@@ -17,10 +17,6 @@ jobs:
             arch: x64
           - os: ubuntu-latest
             arch: arm64
-          - os: macos-latest
-            arch: x64
-          - os: macos-latest
-            arch: arm64
           - os: windows-latest
             arch: x64
           - os: windows-latest
@@ -34,37 +30,57 @@ jobs:
         run: ls -R
         # This helps verify that CMakeLists.txt is present
 
-      - name: Set up CMake
-        uses: jwlawson/actions-setup-cmake@v1
+      - name: Cache CMake (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cmake
+          key: ${{ runner.os }}-cmake-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-cmake-
+
+      - name: Cache CMake (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/cache@v4
+        with:
+          path: C:\Program Files\CMake
+          key: ${{ runner.os }}-cmake-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-cmake-
+
+      - name: Setup CMake
+        uses: lukka/get-cmake@v3.26.4
         with:
           cmake-version: "3.25.0"
 
-      - name: Install Dependencies (Linux)
+      - name: Cache Build Directory
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: ${{ runner.os }}-build-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-build-
+
+      - name: Install Dependencies (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential
-
-      - name: Install Dependencies (macOS)
-        if: matrix.os == 'macos-latest'
-        run: |
-          brew update
-          brew install cmake
+          sudo apt-get install -y build-essential ninja-build
 
       - name: Install Dependencies (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
-          refreshenv
+          choco install ninja -y
+          echo "Ninja installed."
 
       - name: Configure CMake
         run: |
-          mkdir build
+          mkdir -p build
           cd build
           if [ "${{ matrix.os }}" == "windows-latest" ]; then
-            cmake .. -A ${{ matrix.arch }} -DCMAKE_BUILD_TYPE=Release
+            cmake .. -A ${{ matrix.arch }} -G "Ninja" -DCMAKE_BUILD_TYPE=Release
           else
-            cmake .. -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} -DCMAKE_BUILD_TYPE=Release
+            cmake .. -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} -G "Ninja" -DCMAKE_BUILD_TYPE=Release
           fi
 
       - name: Build
@@ -78,8 +94,6 @@ jobs:
           cd build
           if [ "${{ matrix.os }}" == "windows-latest" ]; then
             cp Release/sysguage.exe ../dist/sysguage-${{ matrix.os }}-${{ matrix.arch }}.exe
-          elif [ "${{ matrix.os }}" == "macos-latest" ]; then
-            cp sysguage ../dist/sysguage-${{ matrix.os }}-${{ matrix.arch }}
           else
             cp sysguage ../dist/sysguage-${{ matrix.os }}-${{ matrix.arch }}
           fi
@@ -94,7 +108,7 @@ jobs:
           fi
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: sysguage-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/sysguage-${{ matrix.os }}-${{ matrix.arch }}.zip
@@ -104,7 +118,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download All Artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: sysguage-*
           path: dist
