@@ -31,9 +31,9 @@ jobs:
         # Helps verify that CMakeLists.txt is present
 
       - name: Setup CMake
-        uses: actions/setup-cmake@v3
+        uses: lukka/get-cmake@v3.26.4
         with:
-          cmake-version: "3.25.0" # Correct input name
+          cmakeVersion: "3.25.0" # Correct input name
 
       - name: Install Dependencies (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
@@ -63,6 +63,14 @@ jobs:
         run: |
           ninja --version
           Get-Command ninja | Select-Object Source
+
+      - name: Cache Build Directory (Optional)
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: ${{ runner.os }}-build-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-build-
 
       - name: Configure CMake (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
