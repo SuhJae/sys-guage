@@ -3,6 +3,7 @@ name: Build and Release
 on:
   release:
     types: [created]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -48,6 +49,8 @@ jobs:
         run: |
           cd build
           tar -czvf sysguage-linux.tar.gz sysguage
+          mv sysguage-linux.tar.gz ..
+        shell: bash
 
       # Archive the binary (Windows)
       - name: Archive Binary (Windows)
@@ -55,6 +58,8 @@ jobs:
         run: |
           cd build
           Compress-Archive -Path sysguage.exe -DestinationPath sysguage-windows.zip
+          Move-Item -Path sysguage-windows.zip -Destination ..
+        shell: powershell
 
       # Upload artifact (Linux)
       - name: Upload Artifact (Linux)
@@ -62,7 +67,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: sysguage-linux
-          path: build/sysguage-linux.tar.gz
+          path: sysguage-linux.tar.gz
 
       # Upload artifact (Windows)
       - name: Upload Artifact (Windows)
@@ -70,11 +75,12 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: sysguage-windows
-          path: build/sysguage-windows.zip
+          path: sysguage-windows.zip
 
   release:
     needs: build
     runs-on: ubuntu-latest
+    if: github.event_name == 'release'
     steps:
       - name: Download Artifact (Linux)
         uses: actions/download-artifact@v3
