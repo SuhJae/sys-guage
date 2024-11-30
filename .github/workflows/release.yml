@@ -1,165 +1,71 @@
-name: Build and Release Sysguage
+name: Build and Release
 
 on:
   push:
     tags:
-      - "v*.*.*" # Triggers on version tags like v1.0.0
-  workflow_dispatch: # Allows manual triggering
+      - "v*" # Trigger on version tags
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
+  build-and-release:
+    runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
-            arch: x64
-          - os: ubuntu-latest
-            arch: arm64
+            artifact_name: sysguage-linux
+            cmake_flags: ""
           - os: windows-latest
-            arch: x64
-          - os: windows-latest
-            arch: arm64
+            artifact_name: sysguage-windows.exe
+            cmake_flags: '-G "MinGW Makefiles"'
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: List Repository Files
-        run: ls -R
-        # Helps verify that CMakeLists.txt is present
-
-      - name: Setup CMake
-        uses: lukka/get-cmake@v3.26.4
-        with:
-          cmakeVersion: "3.25.0" # Correct input name
-
-      - name: Install Dependencies (Ubuntu)
+      - name: Install Linux Dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential ninja-build
+          sudo apt-get install -y build-essential cmake
 
-      - name: Install Dependencies (Windows)
+      - name: Install Windows Dependencies
         if: matrix.os == 'windows-latest'
-        run: |
-          choco install visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --includeOptional" --quiet
-          choco install ninja -y
-          echo "Visual Studio Build Tools and Ninja installed."
-
-      - name: Verify CMake Installation
-        run: cmake --version
-
-      - name: Verify Ninja Installation (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          ninja --version
-          which ninja
-
-      - name: Verify Ninja Installation (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          ninja --version
-          Get-Command ninja | Select-Object Source
-
-      - name: Cache Build Directory (Optional)
-        uses: actions/cache@v4
+        uses: msys2/setup-msys2@v2
         with:
-          path: build
-          key: ${{ runner.os }}-build-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-build-
+          msystem: MINGW32
+          update: true
+          install: >-
+            mingw-w64-i686-gcc
+            mingw-w64-i686-cmake
+            mingw-w64-i686-make
 
-      - name: Configure CMake (Ubuntu)
+      - name: Configure CMake (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: |
-          mkdir -p build
-          cd build
-          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }}
-
-      - name: Configure CMake (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
         run: |
           mkdir build
           cd build
-          cmake .. -G "Visual Studio 17 2022" -A ${{ matrix.arch }} -DCMAKE_BUILD_TYPE=Release
+          cmake ..
 
-      - name: Build (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          cd build
-          cmake --build . --config Release --parallel
-
-      - name: Build (Windows)
+      - name: Configure CMake (Windows)
         if: matrix.os == 'windows-latest'
-        shell: pwsh
+        shell: msys2 {0}
+        run: |
+          mkdir build
+          cd build
+          cmake .. -G "MinGW Makefiles"
+
+      - name: Build
         run: |
           cd build
-          cmake --build . --config Release --parallel
+          cmake --build .
 
-      - name: Package Binary (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          mkdir -p dist
-          cd build
-          cp sysguage ../dist/sysguage-${{ matrix.os }}-${{ matrix.arch }}
-
-      - name: Package Binary (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          mkdir dist
-          cd build
-          Copy-Item Release\sysguage.exe ..\dist\sysguage-${{ matrix.os }}-${{ matrix.arch }}.exe
-
-      - name: Compress Package (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          cd dist
-          zip sysguage-${{ matrix.os }}-${{ matrix.arch }}.zip sysguage-${{ matrix.os }}-${{ matrix.arch }}
-
-      - name: Compress Package (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          cd dist
-          Compress-Archive -Path sysguage-${{ matrix.os }}-${{ matrix.arch }}.exe -DestinationPath sysguage-${{ matrix.os }}-${{ matrix.arch }}.zip
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4 # Updated to v4
-        with:
-          name: sysguage-${{ matrix.os }}-${{ matrix.arch }}
-          path: |
-            dist/sysguage-${{ matrix.os }}-${{ matrix.arch }}.zip
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download All Artifacts
-        uses: actions/download-artifact@v4 # Updated to v4
-        with:
-          name: sysguage-*
-          path: dist
-
-      - name: Create GitHub Release
+      - name: Create Release
         id: create_release
-        uses: actions/create-release@v1
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          tag_name: ${{ github.ref_name }}
-          release_name: Release ${{ github.ref_name }}
+          files: |
+            build/sysguage${{ matrix.os == 'windows-latest' && '.exe' || '' }}
           draft: false
           prerelease: false
-          body: |
-            ### Sysguage Release ${{ github.ref_name }}
-            Binaries are available for download.
-
-      - name: Upload Release Assets
-        uses: softprops/action-gh-release@v1
-        with:
-          files: dist/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
