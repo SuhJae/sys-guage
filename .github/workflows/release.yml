@@ -1,71 +1,103 @@
 name: Build and Release
 
 on:
-  push:
-    tags:
-      - "v*" # Trigger on version tags
+  release:
+    types: [created]
 
 jobs:
-  build-and-release:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        include:
-          - os: ubuntu-latest
-            artifact_name: sysguage-linux
-            cmake_flags: ""
-          - os: windows-latest
-            artifact_name: sysguage-windows.exe
-            cmake_flags: '-G "MinGW Makefiles"'
-
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v3
 
-      - name: Install Linux Dependencies
-        if: matrix.os == 'ubuntu-latest'
+      # Install dependencies for 32-bit build on Linux
+      - name: Install 32-bit Libraries (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake
+          sudo apt-get install -y gcc-multilib g++-multilib
 
-      - name: Install Windows Dependencies
-        if: matrix.os == 'windows-latest'
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW32
-          update: true
-          install: >-
-            mingw-w64-i686-gcc
-            mingw-w64-i686-cmake
-            mingw-w64-i686-make
+      # Set up CMake
+      - name: Set up CMake
+        uses: lukka/get-cmake@v3
 
-      - name: Configure CMake (Linux)
-        if: matrix.os == 'ubuntu-latest'
+      # Build for Linux x86
+      - name: Build (Linux x86)
+        if: runner.os == 'Linux'
         run: |
           mkdir build
           cd build
-          cmake ..
-
-      - name: Configure CMake (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: msys2 {0}
-        run: |
-          mkdir build
-          cd build
-          cmake .. -G "MinGW Makefiles"
-
-      - name: Build
-        run: |
-          cd build
+          cmake -DCMAKE_C_FLAGS="-m32" -DCMAKE_CXX_FLAGS="-m32" ..
           cmake --build .
 
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
+      # Build for Windows x86
+      - name: Build (Windows x86)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir build
+          cd build
+          cmake -A Win32 ..
+          cmake --build .
+
+      # Archive the binary (Linux)
+      - name: Archive Binary (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd build
+          tar -czvf sysguage-linux.tar.gz sysguage
+
+      # Archive the binary (Windows)
+      - name: Archive Binary (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd build
+          Compress-Archive -Path sysguage.exe -DestinationPath sysguage-windows.zip
+
+      # Upload artifact (Linux)
+      - name: Upload Artifact (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v3
         with:
-          files: |
-            build/sysguage${{ matrix.os == 'windows-latest' && '.exe' || '' }}
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: sysguage-linux
+          path: build/sysguage-linux.tar.gz
+
+      # Upload artifact (Windows)
+      - name: Upload Artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v3
+        with:
+          name: sysguage-windows
+          path: build/sysguage-windows.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Artifact (Linux)
+        uses: actions/download-artifact@v3
+        with:
+          name: sysguage-linux
+
+      - name: Upload Release Asset (Linux)
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: sysguage-linux.tar.gz
+          asset_name: sysguage-linux.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Download Artifact (Windows)
+        uses: actions/download-artifact@v3
+        with:
+          name: sysguage-windows
+
+      - name: Upload Release Asset (Windows)
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: sysguage-windows.zip
+          asset_name: sysguage-windows.zip
+          asset_content_type: application/zip
