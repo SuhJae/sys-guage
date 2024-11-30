@@ -23,7 +23,7 @@ jobs:
 
       # Set up CMake
       - name: Set up CMake
-        uses: lukka/get-cmake@v3
+        uses: lukka/get-cmake@latest
 
       # Build for Linux x86
       - name: Build (Linux x86)
