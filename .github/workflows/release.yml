@@ -28,31 +28,16 @@ jobs:
 
       - name: List Repository Files
         run: ls -R
-        # This helps verify that CMakeLists.txt is present
-
-      - name: Cache CMake (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/cache@v4
-        with:
-          path: ~/.cmake
-          key: ${{ runner.os }}-cmake-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-cmake-
-
-      - name: Cache CMake (Windows)
-        if: matrix.os == 'windows-latest'
-        uses: actions/cache@v4
-        with:
-          path: C:\Program Files\CMake
-          key: ${{ runner.os }}-cmake-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-cmake-
+        # Helps verify that CMakeLists.txt is present
 
       - name: Setup CMake
         uses: lukka/get-cmake@v3.26.4
         with:
-          cmake-version: "3.25.0"
+          cmakeVersion: "3.25.0" # Correct input name
 
+      # Caching CMake is handled by 'lukka/get-cmake' action
+
+      # Cache Build Directory (Optional)
       - name: Cache Build Directory
         uses: actions/cache@v4
         with:
@@ -73,52 +58,75 @@ jobs:
           choco install ninja -y
           echo "Ninja installed."
 
-      - name: Configure CMake
+      - name: Configure CMake (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
         run: |
           mkdir -p build
           cd build
-          if [ "${{ matrix.os }}" == "windows-latest" ]; then
-            cmake .. -A ${{ matrix.arch }} -G "Ninja" -DCMAKE_BUILD_TYPE=Release
-          else
-            cmake .. -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} -G "Ninja" -DCMAKE_BUILD_TYPE=Release
-          fi
+          cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }}
 
-      - name: Build
+      - name: Configure CMake (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          mkdir build
+          cd build
+          cmake .. -A ${{ matrix.arch }} -G "Ninja" -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
         run: |
           cd build
           cmake --build . --config Release --parallel
 
-      - name: Package Binary
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          cd build
+          cmake --build . --config Release --parallel
+
+      - name: Package Binary (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
         run: |
           mkdir -p dist
           cd build
-          if [ "${{ matrix.os }}" == "windows-latest" ]; then
-            cp Release/sysguage.exe ../dist/sysguage-${{ matrix.os }}-${{ matrix.arch }}.exe
-          else
-            cp sysguage ../dist/sysguage-${{ matrix.os }}-${{ matrix.arch }}
-          fi
+          cp sysguage ../dist/sysguage-${{ matrix.os }}-${{ matrix.arch }}
 
-      - name: Compress Package
+      - name: Package Binary (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          mkdir dist
+          cd build
+          Copy-Item Release\sysguage.exe ..\dist\sysguage-${{ matrix.os }}-${{ matrix.arch }}.exe
+
+      - name: Compress Package (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
         run: |
           cd dist
-          if [ "${{ matrix.os }}" == "windows-latest" ]; then
-            zip sysguage-${{ matrix.os }}-${{ matrix.arch }}.zip sysguage-${{ matrix.os }}-${{ matrix.arch }}.exe
-          else
-            zip sysguage-${{ matrix.os }}-${{ matrix.arch }}.zip sysguage-${{ matrix.os }}-${{ matrix.arch }}
-          fi
+          zip sysguage-${{ matrix.os }}-${{ matrix.arch }}.zip sysguage-${{ matrix.os }}-${{ matrix.arch }}
+
+      - name: Compress Package (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          cd dist
+          Compress-Archive -Path sysguage-${{ matrix.os }}-${{ matrix.arch }}.exe -DestinationPath sysguage-${{ matrix.os }}-${{ matrix.arch }}.zip
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4 # Updated to v4
         with:
           name: sysguage-${{ matrix.os }}-${{ matrix.arch }}
-          path: dist/sysguage-${{ matrix.os }}-${{ matrix.arch }}.zip
+          path: |
+            dist/sysguage-${{ matrix.os }}-${{ matrix.arch }}.zip
 
   release:
     needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Download All Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4 # Updated to v4
         with:
           name: sysguage-*
           path: dist
