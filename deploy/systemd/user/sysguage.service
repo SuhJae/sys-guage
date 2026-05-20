@@ -1,0 +1,18 @@
+[Unit]
+Description=Sysguage Arduino USB serial driver
+Documentation=https://github.com/SuhJae/sys-guage
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/sysguage
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/proc
+
+[Install]
+WantedBy=default.target

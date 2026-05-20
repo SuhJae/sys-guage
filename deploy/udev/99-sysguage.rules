@@ -1,0 +1,4 @@
+# Arduino Uno R3 used by sysguage.
+# TAG+="uaccess" grants the active logged-in desktop user access without sudo.
+# GROUP="dialout" keeps compatibility with non-desktop sessions and services.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2341", ATTRS{idProduct}=="0043", MODE="0660", GROUP="dialout", TAG+="uaccess", SYMLINK+="sysguage"

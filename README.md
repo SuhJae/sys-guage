@@ -1,139 +1,170 @@
 # Sysguage
 
-The **Sysguage** project is a system monitoring tool that uses an Arduino and a serial connection to monitor your computer's CPU and RAM usage. The data is sent to the Arduino, which can be used to control external devices like LEDs or displays.
+Sysguage is the PC-side Rust driver for an Arduino-based system gauge. It
+samples Linux CPU, memory, and network counters and streams compact binary
+frames to the device over USB serial.
 
-## **Features**
+The device firmware is assumed to already be installed. This repository only
+contains the host-side driver.
 
-- Real-time monitoring of CPU, RAM, and network usage.
-- Cross-platform support for Linux, macOS, and Windows.
-- Simple serial communication with an Arduino.
+## Protocol
 
-## **Project Structure**
+The driver sends one 6-byte frame per update:
 
-```
-.
-├── arduino/
-│   ├── main.ino         # Arduino firmware
-├── src/
-│   ├── sysguage.cpp     # Main C++ application code
-├── Makefile             # Build file for Linux/macOS
-├── CMakeLists.txt       # Build file for cross-platform support
-├── README.md            # Project documentation
+```text
+byte 0      CPU usage mapped to PWM, 0-255
+byte 1      RAM usage mapped to PWM, 0-255
+bytes 2-5   network usage in Mbps as uint32, big-endian, capped at 100
 ```
 
-## **Getting Started**
+Default serial settings:
 
-Follow the steps below to set up and run the Sysguage project.
+```text
+baud: 9600
+format: 8N1
+flow control: none
+interval: 250 ms
+```
 
-### **1. Clone the Repository**
+## Build
 
-Clone the repository to your local machine:
+Install Rust with rustup, then build:
 
 ```bash
-git clone https://github.com/SuhJae/sys-guage.git
-cd sys-guage
+cargo build --release
 ```
 
-### **2. Upload Arduino Code**
-
-1. Open the Arduino IDE.
-2. Load the `arduino/main.ino` file.
-3. Connect your Arduino and select the appropriate board and port.
-4. Upload the firmware to the Arduino.
-
-### **3. Compile and Run the C++ Application**
-
-#### **For Linux/macOS**
-
-1. Ensure you have a C++ compiler and `make` installed.
-
-   - On Ubuntu:
-     ```bash
-     sudo apt update
-     sudo apt install build-essential
-     ```
-
-2. Compile the project using the `Makefile`:
-
-   ```bash
-   make
-   ```
-
-3. Run the application:
-
-   ```bash
-   ./sysguage
-   ```
-
-4. To clean the build files:
-   ```bash
-   make clean
-   ```
-
-#### **For Cross-Platform (Linux/macOS/Windows)**
-
-1. Ensure you have CMake installed.
-
-   - On Ubuntu:
-     ```bash
-     sudo apt install cmake
-     ```
-   - On macOS:
-     ```bash
-     brew install cmake
-     ```
-   - On Windows, download and install CMake from [cmake.org](https://cmake.org/).
-
-2. Build the project:
-
-   ```bash
-   mkdir build
-   cd build
-   cmake ..
-   make
-   ```
-
-3. Run the application:
-   ```bash
-   ./sysguage
-   ```
-
-### **4. Permissions (Linux/macOS)**
-
-To avoid using `sudo` when accessing the serial port, add your user to the `dialout` group:
+The optimized binary is:
 
 ```bash
-sudo usermod -a -G dialout $USER
+target/release/sysguage
 ```
 
-After running the above command, log out and log back in for the changes to take effect.
-
-## **Dependencies**
-
-### **Linux/macOS**
-
-- `gcc` or `clang` (C++ compiler)
-- `make` (for Makefile)
-- `cmake` (optional for cross-platform builds)
-
-Install dependencies on Ubuntu:
+The Makefile wraps the same commands:
 
 ```bash
-sudo apt install build-essential cmake
+make release
 ```
 
-### **Windows**
+## Repository Layout
 
-- [MinGW](https://www.mingw-w64.org/) or another C++ compiler
-- [CMake](https://cmake.org/)
+```text
+src/                 Rust driver source
+deploy/systemd/      user and system service definitions
+deploy/udev/         serial-device permission rule
+scripts/             install helpers
+.github/workflows/   CI and release automation
+```
 
-## **Usage**
+## Usage
 
-1. Connect the Arduino to your computer.
-2. Run the `sysguage` application:
-   ```bash
-   ./sysguage
-   ```
-3. The application will:
-   - Calculate CPU RAM, and network usage.
-   - Send data to the Arduino in real-time via the serial port.
+Run with auto-detection:
+
+```bash
+target/release/sysguage
+```
+
+Sysguage first looks for Arduino-like devices under `/dev/serial/by-id`, then
+falls back to serial ports reported by the OS.
+
+Useful options:
+
+```bash
+target/release/sysguage --port /dev/sysguage
+target/release/sysguage --interval-ms 250
+target/release/sysguage --retry-ms 5000
+target/release/sysguage --verbose
+target/release/sysguage --once
+```
+
+If the Arduino is not connected, the driver keeps running and checks for it at
+the retry interval. While waiting, it sleeps between checks to keep overhead low.
+If the USB device is unplugged while running, the driver returns to the same
+wait/reconnect loop.
+
+## Serial Permissions
+
+On Linux, the serial device is usually owned by `root:dialout`. There are two
+good ways to avoid running the driver with sudo.
+
+For terminal sessions and services, add your user to `dialout`, then log out and
+back in:
+
+```bash
+sudo usermod -a -G dialout "$USER"
+```
+
+For desktop sessions, install the included udev rule:
+
+```bash
+./scripts/install-udev-rule.sh
+```
+
+The rule matches the Arduino Uno R3 USB ID, grants active-user access through
+`uaccess`, keeps `dialout` group access, and creates a stable `/dev/sysguage`
+symlink. Unplug and reconnect the Arduino after installing it.
+
+The udev rule requires sudo once because it writes to `/etc/udev/rules.d`. After
+that, the driver itself should run without sudo.
+
+## Service Install
+
+Build the optimized binary:
+
+```bash
+cargo build --release
+```
+
+For a per-user systemd service:
+
+```bash
+./scripts/install-user-service.sh
+```
+
+This installs the binary to `~/.local/bin/sysguage`, enables
+`sysguage.service`, and starts it immediately. To allow the user service to start
+at boot before you log in, enable linger once:
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+For a system-wide boot service:
+
+```bash
+./scripts/install-system-service.sh
+```
+
+This installs the binary to `/usr/local/bin/sysguage`, installs
+`/etc/systemd/system/sysguage.service`, enables it, and starts it. The included
+system service is rendered for the current user and group `dialout`.
+
+Useful service commands:
+
+```bash
+systemctl --user status sysguage.service
+systemctl --user restart sysguage.service
+journalctl --user -u sysguage.service -f
+```
+
+## Background Use
+
+The default mode is quiet and lightweight: it wakes four times per second, reads
+Linux procfs counters, writes 6 bytes to serial, and sleeps. Use `--verbose`
+only when debugging because it logs every sample. When the device is absent, it
+only wakes at the retry interval.
+
+## Releases
+
+CI runs formatting, Clippy, and tests on pushes to `main` and pull requests.
+
+Release builds are automatic for version tags:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The release workflow builds the optimized Linux binary, packages it with the
+deployment files, writes a SHA-256 checksum, and publishes both files to a
+GitHub Release.

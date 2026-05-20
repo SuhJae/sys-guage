@@ -1,109 +1,78 @@
-name: Build and Release
+name: Release
 
 on:
-  release:
-    types: [created]
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, for example v0.2.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  BIN_NAME: sysguage
+  TARGET: x86_64-unknown-linux-gnu
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v3
-
-      # Install dependencies for 32-bit build on Linux
-      - name: Install 32-bit Libraries (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-multilib g++-multilib
-
-      # Set up CMake
-      - name: Set up CMake
-        uses: lukka/get-cmake@latest
-
-      # Build for Linux x86
-      - name: Build (Linux x86)
-        if: runner.os == 'Linux'
-        run: |
-          mkdir build
-          cd build
-          cmake -DCMAKE_C_FLAGS="-m32" -DCMAKE_CXX_FLAGS="-m32" ..
-          cmake --build .
-
-      # Build for Windows x86
-      - name: Build (Windows x86)
-        if: runner.os == 'Windows'
-        run: |
-          mkdir build
-          cd build
-          cmake -A Win32 ..
-          cmake --build .
-
-      # Archive the binary (Linux)
-      - name: Archive Binary (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          cd build
-          tar -czvf sysguage-linux.tar.gz sysguage
-          mv sysguage-linux.tar.gz ..
-        shell: bash
-
-      # Archive the binary (Windows)
-      - name: Archive Binary (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          cd build
-          Compress-Archive -Path sysguage.exe -DestinationPath sysguage-windows.zip
-          Move-Item -Path sysguage-windows.zip -Destination ..
-        shell: powershell
-
-      # Upload artifact (Linux)
-      - name: Upload Artifact (Linux)
-        if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v3
-        with:
-          name: sysguage-linux
-          path: sysguage-linux.tar.gz
-
-      # Upload artifact (Windows)
-      - name: Upload Artifact (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v3
-        with:
-          name: sysguage-windows
-          path: sysguage-windows.zip
-
-  release:
-    needs: build
+  build-release:
     runs-on: ubuntu-latest
-    if: github.event_name == 'release'
     steps:
-      - name: Download Artifact (Linux)
-        uses: actions/download-artifact@v3
-        with:
-          name: sysguage-linux
+      - uses: actions/checkout@v4
 
-      - name: Upload Release Asset (Linux)
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: sysguage-linux.tar.gz
-          asset_name: sysguage-linux.tar.gz
-          asset_content_type: application/gzip
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Download Artifact (Windows)
-        uses: actions/download-artifact@v3
-        with:
-          name: sysguage-windows
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
 
-      - name: Upload Release Asset (Windows)
-        uses: actions/upload-release-asset@v1
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.tag }}"
+          fi
+          archive="${BIN_NAME}-${version}-${TARGET}.tar.gz"
+          mkdir -p "dist/${BIN_NAME}-${version}-${TARGET}"
+          cp "target/release/${BIN_NAME}" "dist/${BIN_NAME}-${version}-${TARGET}/"
+          cp README.md "dist/${BIN_NAME}-${version}-${TARGET}/"
+          cp -R deploy scripts "dist/${BIN_NAME}-${version}-${TARGET}/"
+          tar -czf "$archive" -C dist "${BIN_NAME}-${version}-${TARGET}"
+          sha256sum "$archive" > "${archive}.sha256"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
         with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: sysguage-windows.zip
-          asset_name: sysguage-windows.zip
-          asset_content_type: application/zip
+          name: sysguage-release-assets
+          path: |
+            *.tar.gz
+            *.tar.gz.sha256
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            *.tar.gz
+            *.tar.gz.sha256
+          generate_release_notes: true
+
+      - name: Publish GitHub Release from dispatch
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          files: |
+            *.tar.gz
+            *.tar.gz.sha256
+          generate_release_notes: true

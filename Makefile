@@ -1,10 +1,20 @@
-CXX = g++
-CXXFLAGS = -std=c++11
-SRC = src/sysguage.cpp
 TARGET = sysguage
 
+.PHONY: all release check clean install
+
 all:
-	$(CXX) $(CXXFLAGS) $(SRC) -o $(TARGET)
+	cargo build
+
+release:
+	cargo build --release
+
+check:
+	cargo fmt --check
+	cargo clippy --release -- -D warnings
+	cargo test --release
+
+install: release
+	install -Dm755 target/release/$(TARGET) ~/.local/bin/$(TARGET)
 
 clean:
-	rm -f $(TARGET)
+	cargo clean
